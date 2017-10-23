@@ -7,7 +7,7 @@ import java.io.Serializable;
 import static java.util.Objects.requireNonNull;
 
 /**
- * Created by admin on 2017/10/17.
+ * Created by jerry on 2017/10/22.
  */
 public final class ImmutableMessageQueue extends MessageQueue implements Serializable, Cloneable {
 
@@ -37,12 +37,23 @@ public final class ImmutableMessageQueue extends MessageQueue implements Seriali
     //返回一个不可变消息对象
     public static ImmutableMessageQueue of (MessageQueue messageQueue){
             return  new ImmutableMessageQueue(
-                    messageQueue.getRequestCount(),
+                    messageQueue.getRequeueCount(),
                     messageQueue.getReceiptHandle(),
                     messageQueue.getMessageId(),
                     messageQueue.getVisibility(),
                     messageQueue.getMessageBody());
     }
+
+    public static ImmutableMessageQueue of(Integer requeueCount, String receiptHandle,
+                                           String messageId, Long visibilityDelay, String messageBody) {
+        return new ImmutableMessageQueue(
+                requeueCount,
+                receiptHandle,
+                messageId,
+                visibilityDelay,
+                messageBody);
+    }
+
 
 
     @Override

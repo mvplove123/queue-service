@@ -14,11 +14,11 @@ import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Created by admin on 2017/10/17.
+ * Created by jerry on 2017/10/22.
  */
 public class MessageQueue implements Serializable, Cloneable {
 
-    private Integer requestCount;
+    private Integer reqeueCount;
 
     private String receiptHandle;
 
@@ -46,7 +46,7 @@ public class MessageQueue implements Serializable, Cloneable {
     }
 
     public MessageQueue(Integer requestCount, String receiptHandle, String messageId, String messageBody) {
-        this.requestCount = requestCount;
+        this.reqeueCount = requestCount;
         this.receiptHandle = receiptHandle;
         this.messageId = messageId;
         this.messageBody = messageBody;
@@ -54,17 +54,17 @@ public class MessageQueue implements Serializable, Cloneable {
 
     public MessageQueue(String messageBody) {
         this.messageBody = messageBody;
-        this.requestCount = 0;
+        this.reqeueCount = 0;
         this.receiptHandle = UUID.randomUUID().toString();
         this.messageId = UUID.randomUUID().toString();
     }
 
-    public Integer getRequestCount() {
-        return requestCount;
+    public Integer getRequeueCount() {
+        return reqeueCount;
     }
 
-    public void setRequestCount(Integer requestCount) {
-        this.requestCount = requestCount;
+    public void setRequeueCount(Integer reqeueCount) {
+        this.reqeueCount = reqeueCount;
     }
 
     public String getReceiptHandle() {
@@ -132,7 +132,7 @@ public class MessageQueue implements Serializable, Cloneable {
     @Override
     public String toString() {
         return MoreObjects.toStringHelper(this)
-                .add("requestCount", requestCount)
+                .add("reqeueCount", reqeueCount)
                 .add("receiptHandle", receiptHandle)
                 .add("messageId", messageId)
                 .add("messageBody", messageBody)
@@ -143,7 +143,7 @@ public class MessageQueue implements Serializable, Cloneable {
 
 
     public String writeToString(){
-    return Joiner.on(":").skipNulls().join(requestCount,visibility.get(),receiptHandle,messageId,messageBody);
+    return Joiner.on(":").skipNulls().join(reqeueCount,visibility.get(),receiptHandle,messageId,messageBody);
     }
 
 }

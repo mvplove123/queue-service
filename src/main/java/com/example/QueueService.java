@@ -1,33 +1,33 @@
 package com.example;
 
+import com.amazonaws.util.StringUtils;
 import com.example.model.MessageQueue;
+import com.google.common.base.Splitter;
+import com.google.common.base.Strings;
+import com.google.common.collect.Iterables;
+
+import static com.example.services.StringUtils.requireNonEmpty;
+import static com.google.common.base.Preconditions.checkArgument;
 
 public interface QueueService {
 
-  //
-  // Task 1: Define me.
-  //
-  // This interface should include the following methods.  You should choose appropriate
-  // signatures for these methods that prioritise simplicity of implementation for the range of
-  // intended implementations (in-memory, file, and SQS).  You may include additional methods if
-  // you choose.
-  //
-  // - push
-  //   pushes a message onto a queue.
-  // - pull
-  //   retrieves a single message from a queue.
-  // - delete
-  //   deletes a message from the queue that was received by pull().
-  //
 
-    void push(String queueUrl,Integer delaySeconds,String messageBody);
+    void push(String queueUrl, Integer delaySeconds, String messageBody);
 
     MessageQueue pull(String queueUrl);
 
 
-    void delete(String queryUrl , String receiptHandle);
+    void delete(String queryUrl, String receiptHandle);
 
 
+    default String fromUrl(String queueUrl) {
+        checkArgument(!Strings.isNullOrEmpty(queueUrl), "queueUrl must not be empty");
+
+        return requireNonEmpty(Iterables.getLast(Splitter.on("/").split(queueUrl), null),
+                "queueName must not be empty");
+
+
+    }
 
 
 }

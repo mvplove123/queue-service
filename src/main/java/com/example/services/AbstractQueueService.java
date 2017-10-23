@@ -7,7 +7,7 @@ import org.apache.commons.logging.LogFactory;
 import static org.apache.commons.lang3.ObjectUtils.defaultIfNull;
 
 /**
- * Created by admin on 2017/10/17.
+ * Created by jerry on 2017/10/22.
  */
 public abstract class AbstractQueueService implements QueueService {
 

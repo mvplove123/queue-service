@@ -1,11 +1,10 @@
 package com.example;
 
-import com.example.commonUtils.Utils;
 import com.example.model.ImmutableMessageQueue;
 import com.example.model.MessageQueue;
 import com.example.services.AbstractQueueService;
-import org.joda.time.DateTime;
 import org.apache.commons.lang3.StringUtils;
+import org.joda.time.DateTime;
 
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -47,7 +46,7 @@ public class InMemoryQueueService extends AbstractQueueService {
     @Override
     public void push(String queueUrl, Integer delaySeconds, String messageBody) {
 
-        String queue = Utils.fromUrl(queueUrl);
+        String queue = fromUrl(queueUrl);
 
         //获取指定名称的消息队列，如果为空，则创建，然后把消息添加到消息队列里，有效时间为当前时间+延长时间
         ConcurrentLinkedQueue<MessageQueue> messagesQueue = getMessagesFromQueue(queue);
@@ -62,7 +61,7 @@ public class InMemoryQueueService extends AbstractQueueService {
     @Override
     public MessageQueue pull(String queueUrl) {
 
-        String queue = Utils.fromUrl(queueUrl);
+        String queue = fromUrl(queueUrl);
 
         ConcurrentLinkedQueue<MessageQueue> messagesQueue = getMessagesFromQueue(queue);
 
@@ -79,9 +78,9 @@ public class InMemoryQueueService extends AbstractQueueService {
     @Override
     public void delete(String queryUrl, String receiptHandle) {
 
-        requireNonNull(receiptHandle, "receiptHandle shouldn't null");
+        requireNonNull(receiptHandle, "receipt handle must not be null");
 
-        String queue = Utils.fromUrl(queryUrl);
+        String queue = fromUrl(queryUrl);
 
         ConcurrentLinkedQueue<MessageQueue> messagesQueue = getMessagesFromQueue(queue);
 
@@ -113,7 +112,10 @@ public class InMemoryQueueService extends AbstractQueueService {
 
     }
 
-
+    protected ConcurrentLinkedQueue<MessageQueue> putMessagesIntoQueue(String queue,ConcurrentLinkedQueue<MessageQueue> messagesQueue) {
+        messageQueues.put(queue, messagesQueue);
+        return messagesQueue;
+    }
     protected class VisibilityMessageMonitor extends AbstractVisibilityMonitor {
         protected VisibilityMessageMonitor() {
         }

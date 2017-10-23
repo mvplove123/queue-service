@@ -3,15 +3,13 @@ package com.example;
 import com.example.common.AbstractQueueServiceIT;
 import org.junit.Test;
 
-import java.util.concurrent.ExecutionException;
-
 /**
- * Created by admin on 2017/10/17.
+ * Created by jerry on 2017/10/22.
  */
 public class InMemoryQueueServiceIT extends AbstractQueueServiceIT{
 
 
-    @Test
+//    @Test
     public void shouldRunInConcurrencyModeWithMultipleProducersConsumers() throws Exception {
 
 
@@ -22,7 +20,7 @@ public class InMemoryQueueServiceIT extends AbstractQueueServiceIT{
 
         InMemoryQueueService inMemoryQueueService =new InMemoryQueueService(visibilityTimeoutInSecs,runVisibilityCollector);
 
-        runQueueWithMuitiProducersConsumers(queueUrl,inMemoryQueueService);
+        runQueueServiceWithMultipleProducersConsumers(queueUrl,inMemoryQueueService);
 
 
 

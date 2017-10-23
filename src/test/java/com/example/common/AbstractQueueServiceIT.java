@@ -11,14 +11,14 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Created by admin on 2017/10/17.
+ * Created by jerry on 2017/10/22.
  */
 public abstract class AbstractQueueServiceIT {
 
 
     private static final Log LOG = LogFactory.getLog(AbstractQueueServiceIT.class);
 
-    protected void runQueueWithMuitiProducersConsumers(String queueUrl, QueueService queueService) throws InterruptedException, ExecutionException {
+    protected void runQueueServiceWithMultipleProducersConsumers(String queueUrl, QueueService queueService) throws InterruptedException, ExecutionException {
 
         final AtomicInteger counter = new AtomicInteger(0);
 
