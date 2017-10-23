@@ -7,6 +7,8 @@ import java.util.concurrent.ExecutionException;
 
 /**
  * Created by jerry on 2017/10/22.
+ * Integration test verifying the correct execution of the {@link FileQueueService} class while being invoked by
+ * multiple concurrent producers consumers.
  */
 
 public class FileQueueServiceIT extends AbstractQueueServiceIT {

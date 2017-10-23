@@ -1,24 +1,57 @@
 package com.example.services;
 
 import com.example.QueueService;
+import com.example.InMemoryQueueService;
 import org.apache.commons.logging.Log;
 import org.apache.commons.logging.LogFactory;
+
+import javax.annotation.PreDestroy;
 
 import static org.apache.commons.lang3.ObjectUtils.defaultIfNull;
 
 /**
  * Created by jerry on 2017/10/22.
+ * Queue Service abstract class declaring common constants and methods used across service implementation classes.
  */
 public abstract class AbstractQueueService implements QueueService {
 
-
+    /**
+     * Minimum visibility timeout in second
+     */
     protected static final int MIN_VISIBILITY_TIMEOUT_SECS = 60;
 
+    /**
+     * Visibility timeout initialized with the default constant {@code MIN_VISIBILITY_TIMEOUT_SECS}.
+     */
     protected int visibilityTimeoutInSecs = MIN_VISIBILITY_TIMEOUT_SECS;
 
+    /**
+     * Flag to control the execution of the visibility collector
+     */
     protected boolean stopVisibilityCollector = false;
 
+    /**
+     * Closes resources created by the {@link InMemoryQueueService} instance as well as stopping the execution of the
+     * {@link InMemoryQueueService.VisibilityMessageMonitor}.
+     *
+     * <p>If used inside a container the call of this method will be done automatically when the instance of this class
+     * is about to be garbage collected, as per {@link PreDestroy} annotation logic. However, in a standalone environment
+     * this method will need to be called manually possibly in a finally block.
+     */
+    @PreDestroy
+    public void close() {
+        stopVisibilityCollector = true;
+    }
 
+    /**
+     * Visibility message monitor resetting the visibility of queue messages if expired. As per the implementation of
+     * the {@link QueueService#push(String, Integer, String)} and {@link QueueService#pull(String)} methods,
+     * the visibility of a message can be altered when it is pushed or pulled from the queue. A timestamp is used to determine
+     * the inaccessibility period of a message, which after elapsed, must be reset to {@code 0L}.
+     *
+     * <p>The {@link AbstractVisibilityMonitor} implementation classes are thread-safe watchers that can run concurrently
+     * with other threads operating on the {@link QueueService} public methods (push, pull, delete).
+     */
     protected abstract class AbstractVisibilityMonitor implements Runnable {
 
         private final Log LOG = LogFactory.getLog(AbstractVisibilityMonitor.class);

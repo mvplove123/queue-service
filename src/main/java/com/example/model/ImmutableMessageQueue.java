@@ -8,6 +8,8 @@ import static java.util.Objects.requireNonNull;
 
 /**
  * Created by jerry on 2017/10/22.
+ * Class representing an immutable version of (MessageQueue class) in order to keep
+ * the internal state of the queue messages safe.
  */
 public final class ImmutableMessageQueue extends MessageQueue implements Serializable, Cloneable {
 

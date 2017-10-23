@@ -16,7 +16,11 @@ import static com.google.common.base.Preconditions.checkArgument;
  */
 public class Utils {
 
-
+    /**
+     *  Creates a file
+     * @param file
+     * @return
+     */
     public static final File createFile(File file) {
         if (!file.exists()) {
 
@@ -30,6 +34,10 @@ public class Utils {
         return file;
     }
 
+    /**
+     * Creates directory
+     * @param path
+     */
     public static final void createDirectory(String path) {
 
         File file = new File(path);

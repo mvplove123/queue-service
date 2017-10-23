@@ -17,6 +17,9 @@ import static org.apache.commons.lang3.ObjectUtils.defaultIfNull;
 
 public class InMemoryQueueService extends AbstractQueueService {
 
+    /**
+     * Concurrent map structure used to store messages per queue name into another concurrent FIFO message queue.
+     */
     private ConcurrentHashMap<String, ConcurrentLinkedQueue<MessageQueue>> messageQueues = new ConcurrentHashMap<>();
 
 
@@ -26,7 +29,7 @@ public class InMemoryQueueService extends AbstractQueueService {
     protected InMemoryQueueService(Integer visibilityTimeoutInSecs,boolean runVisibilityMonitor){
 
         this.visibilityTimeoutInSecs = defaultIfNull(visibilityTimeoutInSecs,MIN_VISIBILITY_TIMEOUT_SECS);
-
+        // start message checker
         startVisibilityMonitor(runVisibilityMonitor);
 
     }
@@ -36,19 +39,31 @@ public class InMemoryQueueService extends AbstractQueueService {
 
         if (runVisibilityMonitor) {
             // run visibility message checker
-
-            Thread visibilityMonitor = new Thread(new VisibilityMessageMonitor());
+            Thread visibilityMonitor = new Thread(new VisibilityMessageMonitor(), "inMemoryQueueService-visibilityMonitor");
+            visibilityMonitor.setDaemon(true);
+            visibilityMonitor.start();
         }
 
     }
 
-
+    /**
+     * Pushes a message at the end of a queue given arguments.
+     * <p>This method accepts a {@code queueUrl} parameter which must be a valid url slash-separated ('/') and ending
+     * with the queueName, e.g: "http://sqs.us-east-2.amazonaws.com/123456789012/MyQueue".
+     * If {@code delaySeconds} is provided, this method will set the visibility of the message pushed as per below:
+     * <pre>{@code
+     * visibility = currentTimeMillis + delayInMillis
+     * }</pre>
+     *
+     * @param queueUrl
+     * @param delaySeconds
+     * @param messageBody
+     */
     @Override
     public void push(String queueUrl, Integer delaySeconds, String messageBody) {
 
         String queue = fromUrl(queueUrl);
 
-        //获取指定名称的消息队列，如果为空，则创建，然后把消息添加到消息队列里，有效时间为当前时间+延长时间
         ConcurrentLinkedQueue<MessageQueue> messagesQueue = getMessagesFromQueue(queue);
         if (messagesQueue == null) {
             messagesQueue = putMessagesToQueue(queue, new ConcurrentLinkedQueue());
@@ -58,6 +73,18 @@ public class InMemoryQueueService extends AbstractQueueService {
                         messageBody));
     }
 
+    /**
+     * Pulls a message from the top of the queue given {@code queueUrl} argument. The message retrieved must be visible
+     * according to its visibility timestamp (i.e equals to 0L). Any message with visibility > 0L value will be
+     * skipped and considered invisible.
+     *
+     * <p>Note that any other messages with visibility > 0L will be checked by the {@link VisibilityMessageMonitor} and
+     * reset to 0L if their invisibility period has expired.
+     *
+     * @param queueUrl  Queue url holding the queue name to extract
+     * @return  MessageQueue instance made up with message body and receiptHandle identifier used to delete the message
+     * @throws  IllegalArgumentException If queue name cannot be extracted from queueUrl argument
+     */
     @Override
     public MessageQueue pull(String queueUrl) {
 
@@ -75,12 +102,20 @@ public class InMemoryQueueService extends AbstractQueueService {
         return null;
     }
 
+    /**
+     * Deletes a message from the queue given {@code queueUrl} and {@code receiptHandle} arguments.
+     *
+     * @param queueUrl  Queue url holding the queue name to extract
+     * @param receiptHandle  Receipt handle identifier
+     * @throws IllegalArgumentException If queue url is invalid
+     * @throws NullPointerException If receipt handle is null
+     */
     @Override
-    public void delete(String queryUrl, String receiptHandle) {
+    public void delete(String queueUrl, String receiptHandle) {
 
         requireNonNull(receiptHandle, "receipt handle must not be null");
 
-        String queue = fromUrl(queryUrl);
+        String queue = fromUrl(queueUrl);
 
         ConcurrentLinkedQueue<MessageQueue> messagesQueue = getMessagesFromQueue(queue);
 
@@ -119,6 +154,12 @@ public class InMemoryQueueService extends AbstractQueueService {
     protected class VisibilityMessageMonitor extends AbstractVisibilityMonitor {
         protected VisibilityMessageMonitor() {
         }
+        /**
+         * Checks and resets the visibility of messages exceeding the timeout. The update done in this method is still safe
+         * as when message.getVisibility() > 0L, the message is considered invisible by the system (consumers/producers threads
+         * won't see this message), that is, only the {@link VisibilityMessageMonitor} thread will access it and possibly
+         * modify it. Thus, the check and reset can safely happen in a non-atomic manner.
+         */
         protected void checkMessageVisibility() {
             requireNonNull(getMessageQueue(), "messageQueue variable must not be null");
 

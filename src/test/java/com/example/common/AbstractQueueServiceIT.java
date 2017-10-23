@@ -12,6 +12,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Created by jerry on 2017/10/22.
+ * Abstract integration test class declaring method to run {@link QueueService}
+ * implementation class with multiple producers consumers running concurrently.
  */
 public abstract class AbstractQueueServiceIT {
 
@@ -19,12 +21,17 @@ public abstract class AbstractQueueServiceIT {
     private static final Log LOG = LogFactory.getLog(AbstractQueueServiceIT.class);
 
     protected void runQueueServiceWithMultipleProducersConsumers(String queueUrl, QueueService queueService) throws InterruptedException, ExecutionException {
+        // ------------------------------------------------------------------------ //
+        // 1- Run multiple concurrent producers simultaneously to fill up the queue //
+        // ------------------------------------------------------------------------ //
 
+        // atomic counter for creating new message body
         final AtomicInteger counter = new AtomicInteger(0);
 
-
+        // pushers list
         List<Callable<String>> pushers = Lists.newArrayList();
 
+        // executor instance that run thread in parallel
         ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
 
 
@@ -42,6 +49,12 @@ public abstract class AbstractQueueServiceIT {
         }
         executor.invokeAll(pushers);
 
+
+        // --------------------------------------------------- //
+        // 2- Run multiple concurrent consumers simultaneously //
+        // --------------------------------------------------- //
+
+        // pull and remove concurrently message from queue
         for (int i = 0; i < 59; i++) {
 
 
@@ -52,7 +65,7 @@ public abstract class AbstractQueueServiceIT {
                 return messageQueue.getReceiptHandle();
 
             };
-
+            // execute consumer threads and retrieve the returned receipt handle
             String receiptHandle = executor.submit(workPuller).get();
 
 
@@ -61,18 +74,26 @@ public abstract class AbstractQueueServiceIT {
                 LOG.info("consumer deleted message with receipt handle : " + receiptHandle);
 
             };
-
+            // execute remover threads
             if (i % 2 == 0) {
                 executor.execute(workerRemover);
             }
         }
 
-
+        // ----------------------------------- //
+        // 3- Shutting down executor instances //
+        // ----------------------------------- //
         executor.shutdown();
-
+        // Wait until all threads are finish
         executor.awaitTermination(10000L, TimeUnit.SECONDS);
 
+        // ---------------------------------------------------------------------------------------------------- //
+        // 4- Pulling messages randomly and at regular time interval to verify the visibility monitor execution //
+        // ---------------------------------------------------------------------------------------------------- //
 
+
+        // verify the execution of Visibility monitor that should progressively
+        // reactivate the invisible messages still in the queue
         Thread.sleep(2000L);
         MessageQueue messageQueue = queueService.pull(queueUrl);
 

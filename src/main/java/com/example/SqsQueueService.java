@@ -11,6 +11,10 @@ import org.apache.commons.logging.LogFactory;
 
 import java.util.Optional;
 
+/**
+ * Created by jerry on 2017/10/22.
+ * SQS adapter class providing standard operations to push, pull and remove messages from a AWS SQS Queue.
+ */
 public class SqsQueueService extends AbstractQueueService {
 
 
@@ -29,6 +33,11 @@ public class SqsQueueService extends AbstractQueueService {
         sqsClient.sendMessage(new SendMessageRequest(queueUrl, messageBody).withDelaySeconds(delaySeconds));
     }
 
+    /**
+     * this method pulls only the first top message among the list of messages returned by SQS client.
+     * @param queueUrl
+     * @return
+     */
     @Override
     public MessageQueue pull(String queueUrl) {
         Optional<Message> message = sqsClient.receiveMessage(queueUrl).getMessages().stream().findFirst();

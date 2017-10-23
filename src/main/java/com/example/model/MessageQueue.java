@@ -15,6 +15,8 @@ import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Created by jerry on 2017/10/22.
+ * Class representing a message queue and holding the message details, namely its requeue count,
+ * receipt handle, message id, visibility and message body.
  */
 public class MessageQueue implements Serializable, Cloneable {
 
@@ -95,11 +97,20 @@ public class MessageQueue implements Serializable, Cloneable {
         return visibility.get();
     }
 
+    /**
+     * Resets the visibility value.
+     * @param visibility
+     */
     public void setVisibility(Long visibility) {
         this.visibility.set(visibility);
     }
 
-
+    /**
+     * Compares and sets atomically the visibility value by invoking {@link AtomicLong#compareAndSet(long, long)} method
+     * @param expect
+     * @param update
+     * @return
+     */
     public boolean compareAndSetVisibility(long expect , long update){
             return visibility.compareAndSet(expect,update);
     }

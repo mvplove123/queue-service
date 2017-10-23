@@ -37,21 +37,72 @@ import static com.google.common.base.Preconditions.checkArgument;
 import static java.util.Objects.requireNonNull;
 import static org.apache.commons.lang3.ObjectUtils.defaultIfNull;
 
+/**
+ * Queue Service class providing standard operations to push, pull and remove messages from a file-based FIFO Queue.
+ * <p/>
+ * <p>This class creates a set of files and directories under {@code /home/.canva} by default (cf. {@link #DEFAULT_CANVA_DIR})
+ * which can be overridden using {@link FileQueueService#FileQueueService(String, Integer, boolean)} constructor.
+ * This service class works on a {@code queueName} basis whereby each queue is stored under its own directory
+ * (e.g {@code /home/.canva/myqueue} containing messages file ({@code /home/.canva}/myqueue/messages) and lock file
+ * ({@code /home/.canva}/myqueue/.lock).
+ * <p/>
+ * <p>Two level of locks are used in this class, one for threads and another for processes making it usable in a
+ * multi-vm environment. The thread lock strategy is based on a list of locks per queue name stored in a concurrent
+ * {@link #threadLockMap} map. As a result, this class service can be used concurrently by multiple threads that won't block
+ * when working on different queues. However, when trying to access the same queue file, a pessimistic lock is applied
+ * based on {@link ReentrantLock} locking strategy. In addition, a process lock is being used so that the queue files
+ * can safely be accessed by several VMs. In order to make the queue files inter-process safe, a file lock per queue is created
+ * and removed at the end of each operation (push, pull, delete). When a lock file is created and used by a process
+ * the other processes working on the same queue, will run in a sleep loop (thread/process spinning approach) until
+ * the lock is released (cf. file.mkdir() lock strategy).<br>
+ * <p/>
+ * <p>This class enables a daemon thread used for cleaning up any pending lock files left when exiting
+ * abruptly the program.
+ * <p/>
+ * <p>Note that this thread can be turned off when invoking the constructor of this class through
+ * {@link FileQueueService#FileQueueService(String, Integer, boolean)}.
+ * <p/>
+ * <p>The {@link FileQueueService.FileLockShutdownHook} can also but triggered separately using the following code snippet:<br>
+ * <p/>
+ * <pre>{@code
+ * <p/>
+ * // Add shutdown hook to release lock when application shutdown
+ * FileQueueService.FileLockShutdownHook shutdownHook = new FileQueueService().new FileLockShutdownHook();
+ * Runtime.getRuntime().addShutdownHook(new Thread(shutdownHook, "fileQueueService-shutdownHook"));
+ * }</pre>
+ *
+ * @see QueueService
+ * @see FileQueueService.FileLockShutdownHook
+ */
 public class FileQueueService extends AbstractQueueService {
     private static final Log LOG = LogFactory.getLog(FileQueueService.class);
 
 
     private String canvaDirPath;
 
-
+    /**
+     * Messages file name constant
+     */
     private static final String MESSAGES_FILE_NAME = "messages";
-
+    /**
+     * Temporary message file name constant used by {@link #push(String, Integer, String)}, {@link #pull(String)}
+     * and {@link #delete(String, String)} methods.
+     */
     private static final String NEW_MESSAGES_FILE_NAME = "messages.new";
-
+    /**
+     * Lock file name constant
+     */
     private static final String LOCK_DIR_NAME = ".lock";
-
+    /**
+     * Concurrent list used for storing file lock instances per queue. This list is used by
+     * {@link FileLockShutdownHook} thread class to remove any pending lock file (if left around)
+     * before exiting the program.
+     */
     private CopyOnWriteArrayList<File> lockFiles = Lists.newCopyOnWriteArrayList();
-
+    /**
+     * Concurrent map storing thread lock instance and related queue name pairs. It helps making this class thread-safe
+     * by allowing multiple threads working on different queue to run concurrently without blocking.
+     */
     private ConcurrentHashMap<String, ReentrantLock> threadLockMap = new ConcurrentHashMap<>();
 
     private static final String DEFAULT_CANVA_DIR = System.getProperty("user.home") + File.separator + ".canva";
@@ -62,6 +113,14 @@ public class FileQueueService extends AbstractQueueService {
     protected FileQueueService() {
     }
 
+    /**
+     * Creates a {@link FileQueueService} instance given {@code path}, {@code timeoutInSecs} and {@code runShutdownHook}
+     * arguments. The latter argument is used to run the shutdown hook that cleans up pending lock files.
+     *
+     * @param baseDirPath             Path used to initialize the canva base director
+     * @param visibilityTimeoutInSecs Visibility timeout in seconds
+     * @param addShutdownHook         Boolean indicating if file lock shutdown hook should be added
+     */
     public FileQueueService(String baseDirPath, Integer visibilityTimeoutInSecs, boolean addShutdownHook) {
         this.canvaDirPath = !StringUtils.isEmpty(baseDirPath) ? baseDirPath : DEFAULT_CANVA_DIR;
         this.visibilityTimeoutInSecs = defaultIfNull(visibilityTimeoutInSecs, MIN_VISIBILITY_TIMEOUT_SECS);
@@ -85,7 +144,28 @@ public class FileQueueService extends AbstractQueueService {
         }
     }
 
-
+    /**
+     * Pushes a message at the end of a queue given {@code queueUrl}, {@code delaySeconds} and {@code messageBody} arguments.
+     * If {@code delaySeconds} is provided, this method will set the visibility of the message pushed as per below:<br>
+     * <p/>
+     * <pre>{@code
+     * visibility = currentTimeMillis + delayInMillis
+     * }</pre>
+     * <p/>
+     * <p>This method uses a thread and process lock strategy to apply and support concurrency. The thread lock is
+     * using a concurrent map that relates a {@link ReentrantLock} lock instance to a specific queue name. When invoking
+     * this method, a thread and process lock are applied on a per-queue basis leaving other threads/processes free to
+     * access any other queue without blocking.
+     * <p/>
+     * <p>This method accepts a {@code queueUrl} parameter which must be a valid url slash-separated ('/') and ending
+     * with the queueName, e.g: "http://sqs.us-east-2.amazonaws.com/123456789012/MyQueue".
+     *
+     * @param queueUrl     Queue url holding the queue name to extract
+     * @param delaySeconds Message visibility delay in seconds
+     * @param messageBody  Message body to push
+     * @throws QueueServiceException    Thrown in case of issue while pushing the message to the queue
+     * @throws IllegalArgumentException If queue url is invalid
+     */
     @Override
     public void push(String queueUrl, Integer delaySeconds, String messageBody) {
 
@@ -118,7 +198,33 @@ public class FileQueueService extends AbstractQueueService {
         return new PrintWriter(new FileWriter(fileMessages, true));
     }
 
-
+    /**
+     * Pulls a visible message from the top of the queue given {@code queueUrl} argument, returns null otherwise.
+     * The visibility of a message is determined according to its visibility timestamp (i.e equals to 0L or if
+     * visibility < current millis). Any message with a visibility value above current time will be skipped
+     * and considered invisible.
+     * <p/>
+     * <p>When the top message is pulled out from the queue, it is physically still kept in the file messages but with
+     * a different visibility timestamp for a short period, or until the message is removed by calling {@link #delete(String, String)}.
+     * During this period the message is considered invisible and cannot be accessed. When the invisibility period
+     * has elapsed the message become available again and can be pulled from the queue.
+     * <p/>
+     * <p>When applying a change on the file queue, first this method creates a temporary new file messages with
+     * the latest changes and then replaces the existing file messages with the new one.
+     * <p/>
+     * <p>This method uses a thread and process lock strategy to apply and support concurrency. The thread lock is
+     * using a concurrent map that relates a {@link ReentrantLock} lock instance to a specific queue name. When invoking
+     * this method, a thread and process locks are applied on a per-queue basis leaving other threads/processes free to
+     * access any other queue without blocking.
+     * <p/>
+     * <p>This method accepts a {@code queueUrl} parameter which must be a valid url slash-separated ('/') and ending
+     * with the queueName, e.g: "http://sqs.us-east-2.amazonaws.com/123456789012/MyQueue".
+     *
+     * @param queueUrl Queue url holding the queue name to extract
+     * @return MessageQueue instance made up with message body and receiptHandle identifier used to delete the message
+     * @throws QueueServiceException    Thrown in case of issue while pulling the message from the queue
+     * @throws IllegalArgumentException If queue name cannot be extracted from queueUrl argument
+     */
     @Override
     public MessageQueue pull(String queueUrl) {
         String queue = fromUrl(queueUrl);
@@ -174,13 +280,33 @@ public class FileQueueService extends AbstractQueueService {
         return ImmutableMessageQueue.of(messageQueue);
     }
 
+    /**
+     * Deletes a message from the queue given {@code queueUrl} and {@code receiptHandle} arguments.
+     * <p/>
+     * <p>When applying a change on the file queue, first this method creates a temporary new file messages with
+     * the latest changes and then replaces the existing file messages with the new one.
+     * <p/>
+     * <p>This method uses a thread and process lock strategy to apply and support concurrency. The thread lock is
+     * using a concurrent map that relates a {@link ReentrantLock} lock instance to a specific queue name. When invoking
+     * this method, a thread and process locks are applied on a per-queue basis leaving other threads/processes free to
+     * access any other queue without blocking.
+     * <p/>
+     * <p>This method accepts a {@code queueUrl} parameter which must be a valid url slash-separated ('/') and ending
+     * with the queueName, e.g: "http://sqs.us-east-2.amazonaws.com/123456789012/MyQueue".
+     *
+     * @param queueUrl      Queue url holding the queue name to extract
+     * @param receiptHandle Receipt handle identifier
+     * @throws QueueServiceException    In case of issue while deleting the message from the queue
+     * @throws IllegalArgumentException If queue url is invalid
+     * @throws NullPointerException     If receipt handle is null
+     */
     @Override
-    public void delete(String queryUrl, String receiptHandle) {
+    public void delete(String queueUrl, String receiptHandle) {
 
 
         requireNonNull(receiptHandle, "receipt handle must not be null");
 
-        String queue = fromUrl(queryUrl);
+        String queue = fromUrl(queueUrl);
 
         File fileMessages = getMessagesFile(queue);
 
@@ -212,19 +338,14 @@ public class FileQueueService extends AbstractQueueService {
 
 
     }
-
-
-    protected File getMessageFile(String queueName) {
-
-        checkArgument(!Strings.isNullOrEmpty(queueName), "queueName is not null");
-
-        createDirectory(canvaDirPath + File.separator + queueName);
-
-        return createFile(new File(canvaDirPath + File.separator + queueName + File.separator + MESSAGES_FILE_NAME));
-
-    }
-
-
+    /**
+     * Returns a lock file instance given the {@code queueName} argument. This method creates the related queue directory
+     * if it doesn't exist. The concrete creation of the lock file on disk is left to the {@link #lock(File)} method to enable
+     * inter-process concurrency.
+     *
+     * @param queueName Queue name
+     * @return File lock instance
+     */
     protected File getLockFile(String queueName) {
 
         checkArgument(!Strings.isNullOrEmpty(queueName), "queueName is not null");
@@ -235,7 +356,22 @@ public class FileQueueService extends AbstractQueueService {
 
     }
 
-
+    /**
+     * Triggers a thread lock based on a {@link ReentrantLock} instance retrieved from {@link #threadLockMap} map
+     * along with an inter-process lock using the {@link File#mkdir()} method, given a {@code lock} file instance.
+     *
+     * <p>This method uses a pessimistic thread lock per queue that will provide exclusive access to a queue and
+     * its related messages file to the first thread that acquires the lock. Any other threads trying to access
+     * the same queue will block until the lock is released.
+     *
+     * <p>This method uses also a inter-process lock through the {@link File#mkdir()} atomic method, which makes the
+     * program inter-process safe.
+     *
+     * <p>This method also adds the lock file created to a concurrent list {@link #lockFiles} so that it can
+     * be used by the {@link FileLockShutdownHook} to remove any left lock file from disk if the program exits abruptly.
+     *
+     * @param lock File lock instance
+     */
     protected void lock(File lock) {
 
         getThreadLock(lock).lock();
@@ -250,7 +386,12 @@ public class FileQueueService extends AbstractQueueService {
         }
 
     }
-
+    /**
+     * Releases thread and process locks enables by {@link #lock(File)} method. This method also remove the lock file
+     * instance from the concurrent list {@link #lockFiles}.
+     *
+     * @param lock File lock instance
+     */
     protected void unlock(File lock) {
 
         lock.delete();
@@ -260,7 +401,12 @@ public class FileQueueService extends AbstractQueueService {
         getThreadLock(lock).unlock();
     }
 
-
+    /**
+     * Returns a {@link ReentrantLock} lock instance given the file {@code lock} argument.
+     *
+     * @param lock File lock instance
+     * @return ReentrantLock instance related to the File lock argument
+     */
     private ReentrantLock getThreadLock(File lock) {
 
         ReentrantLock threadLock = threadLockMap.get(lock.getPath());
@@ -271,23 +417,6 @@ public class FileQueueService extends AbstractQueueService {
         }
 
         return threadLock;
-
-    }
-
-
-    protected File getNewMessagesFile(String queueName) {
-
-        checkArgument(!Strings.isNullOrEmpty(queueName), "queueName must not bet null");
-
-        createDirectory(canvaDirPath + File.separator + queueName);
-
-        return createFile(new File(canvaDirPath + File.separator + queueName + File.separator + NEW_MESSAGES_FILE_NAME));
-
-    }
-
-    protected BufferedReader getBufferedReader(File fileMessages) throws IOException {
-
-        return Files.newBufferedReader(fileMessages.toPath());
 
     }
 
@@ -325,17 +454,15 @@ public class FileQueueService extends AbstractQueueService {
         return messageLine;
     }
 
-
-    protected String udpateMessageVisibility(String messageLine, Integer delaySeconds) {
-
-        List<String> recordFields = Lists.newArrayList(Splitter.on(":").split(validateMessage(messageLine)));
-
-        long visibility = DateTime.now().getMillis() + TimeUnit.SECONDS.toMillis(delaySeconds);
-
-        return Joiner.on(":").useForNull("").join(recordFields.get(0), visibility, recordFields.get(2), recordFields.get
-                (3), recordFields.get(4));
-    }
-
+    /**
+     * Writes the updated message line to new file messages. This method will be useful mainly for
+     * the {@link #pull(String)} method after having identified the message line to pull.
+     *
+     * @param streamSupplier     Stream supplier instance bound to the current file messages to read from
+     * @param writer             Writer instance bound to the new file messages
+     * @param visibleLineToWrite Message line with updated visibility timestamp to write to file
+     * @throws IllegalStateException If message id cannot be retrieved from message line
+     */
     protected void writeNewVisibilityToFile(Supplier<Stream<String>> streamSupplier, PrintWriter writer, String
             visibleLineToWrite) {
 
@@ -363,6 +490,14 @@ public class FileQueueService extends AbstractQueueService {
 
     }
 
+    /**
+     * Update message visibility timeout according to {@code delaySeconds} argument and returns the new message line.
+     *
+     * @param messageLine Message line to update
+     * @param delaySeconds  Message visibility delay in seconds
+     * @return New Message line with updated visibility
+     * @throws IllegalArgumentException If message is invalid as per {@link #validateMessage(String)} method
+     */
     protected String updateMessageVisibility(String messageLine, Integer delaySeconds) {
         List<String> recordFields = Lists.newArrayList(Splitter.on(":").split(
                 validateMessage(messageLine)));
@@ -374,7 +509,12 @@ public class FileQueueService extends AbstractQueueService {
                 .join(recordFields.get(0), visibility, recordFields.get(2), recordFields.get(3), recordFields.get(4));
     }
 
-
+    /**
+     * Shutdown hook class that removes the remaining lock files before exiting the program. This class allows the
+     * program to cleanly shutdown and prevents any issue while restarting it later on.
+     *
+     * @see FileQueueService#lockFiles
+     */
     protected class FileLockShutdownHook implements Runnable {
 
         public void run() {
@@ -406,6 +546,13 @@ public class FileQueueService extends AbstractQueueService {
 
     }
 
+    /**
+     * Returns the file messages given the {@cde queueName} argument. This method creates the related queue directory
+     * if it doesn't exist along with the file messages itself on disk if non-existent.
+     *
+     * @param queueName Queue name
+     * @return File messages instance
+     */
     protected File getMessagesFile(String queueName) {
         checkArgument(!Strings.isNullOrEmpty(queueName), "queueName must not be null");
 
@@ -414,6 +561,29 @@ public class FileQueueService extends AbstractQueueService {
 
         // create message file
         return createFile(new File(canvaDirPath + File.separator + queueName + File.separator + MESSAGES_FILE_NAME));
+    }
+
+    /**
+     * Returns the new file messages given the {@cde queueName} argument. This method creates the related queue directory
+     * if it doesn't exist along with the new file messages itself on disk if non-existent.
+     *
+     * @param queueName Queue name
+     * @return File messages instance
+     */
+    protected File getNewMessagesFile(String queueName) {
+
+        checkArgument(!Strings.isNullOrEmpty(queueName), "queueName must not bet null");
+
+        createDirectory(canvaDirPath + File.separator + queueName);
+
+        return createFile(new File(canvaDirPath + File.separator + queueName + File.separator + NEW_MESSAGES_FILE_NAME));
+
+    }
+
+    protected BufferedReader getBufferedReader(File fileMessages) throws IOException {
+
+        return Files.newBufferedReader(fileMessages.toPath());
+
     }
 
     protected void writeLinesToNewFile(File newFileMessages, List<String> linesWithoutReceiptHandle) throws IOException {
